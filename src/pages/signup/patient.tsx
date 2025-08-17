@@ -3,16 +3,96 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
+import { signUpWithEmailPassword, signInWithGoogle, getAuthErrorMessage } from "../../lib/auth";
 
+// ### Backend ###
+// 환자 회원가입 페이지 컴포넌트
 export default function PatientSignUp() {
   const router = useRouter();
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [birth, setBirth] = useState("");
+  const [patientId, setPatientId] = useState("");
+  const [phone, setPhone] = useState("");
+  const [hospital, setHospital] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [isGoogleAuth, setIsGoogleAuth] = useState(false);
 
   // Google 로그인 후 /signup/patient?email=... 로 받으면 고정표시
   useEffect(() => {
     const q = router.query.email;
-    if (typeof q === "string") setEmail(q);
+    if (typeof q === "string") {
+      setEmail(q);
+      setIsGoogleAuth(true);
+    }
   }, [router.query.email]);
+
+  // ### Backend ###
+  // Google 로그인 처리 함수
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const user = await signInWithGoogle();
+      if (user.email) {
+        setEmail(user.email);
+        setIsGoogleAuth(true);
+      }
+    } catch (error: any) {
+      setError(getAuthErrorMessage(error.code));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ### Backend ###
+  // 회원가입 제출 처리 함수
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    
+    // 필수 필드 검증
+    if (!email || !name || !password || !birth || !patientId) {
+      setError("모든 필수 항목을 입력해주세요.");
+      return;
+    }
+
+    // 비밀번호 길이 검증
+    if (password.length < 6) {
+      setError("비밀번호는 6자 이상이어야 합니다.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      // 환자 추가 정보
+      const additionalData = {
+        birth,
+        patientId,
+        phone: phone || null,
+        hospital: hospital || null,
+        isVerified: false, // 환자 인증 상태
+        isGoogleAuth
+      };
+
+      // Firebase Authentication과 Realtime Database에 사용자 등록
+      await signUpWithEmailPassword(email, password, name, 'patient', additionalData);
+      
+      // 회원가입 성공 시 대시보드로 이동
+      alert("회원가입이 완료되었습니다!");
+      router.push('/dashboard/patient');
+    } catch (error: any) {
+      console.error('회원가입 에러:', error);
+      const errorCode = error?.code || 'auth/unknown-error';
+      const errorMessage = getAuthErrorMessage(errorCode);
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <>
@@ -35,12 +115,30 @@ export default function PatientSignUp() {
             기본 정보와 환자번호 인증을 완료해 주세요.
           </p>
 
+          {/* ### Backend ### */}
+          {/* Google 로그인 버튼 (이메일이 없을 때만 표시) */}
+          {!email && (
+            <button
+              type="button"
+              className="btn-google"
+              onClick={handleGoogleSignIn}
+              disabled={loading}
+            >
+              <Image src="/google_logo.png" alt="Google" width={20} height={20} />
+              <span>Google로 계속하기</span>
+            </button>
+          )}
+
+          {/* 에러 메시지 표시 */}
+          {error && (
+            <div className="error-message" role="alert">
+              {error}
+            </div>
+          )}
+
           <form
             className="form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              alert("데모 화면입니다. (제출 이벤트)");
-            }}
+            onSubmit={handleSubmit}
           >
             {/* ── Google 인증 이메일 (수정 불가) ────────────────────────── */}
             <div className="field">
@@ -53,11 +151,13 @@ export default function PatientSignUp() {
                 className="input"
                 type="email"
                 value={email}
+                onChange={(e) => !isGoogleAuth && setEmail(e.target.value)}
                 placeholder="google@example.com"
-                disabled
-                readOnly
-                aria-readonly="true"
+                disabled={isGoogleAuth}
+                readOnly={isGoogleAuth}
+                aria-readonly={isGoogleAuth ? "true" : "false"}
                 aria-describedby="emailHelp"
+                required
               />
               <small id="emailHelp" className="helper">
                 Google 로그인으로 인증된 이메일입니다. 수정할 수 없습니다.
@@ -67,17 +167,40 @@ export default function PatientSignUp() {
             {/* ── 기본 정보 ────────────────────────────────────────────── */}
             <div className="field">
               <label className="label" htmlFor="name">이름</label>
-              <input id="name" className="input" placeholder="홍길동" />
+              <input 
+                id="name" 
+                className="input" 
+                placeholder="홍길동" 
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+              />
             </div>
 
             <div className="field">
               <label className="label" htmlFor="password">비밀번호</label>
-              <input id="password" type="password" className="input" placeholder="••••••••" />
+              <input 
+                id="password" 
+                type="password" 
+                className="input" 
+                placeholder="••••••••" 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={6}
+              />
             </div>
 
             <div className="field">
               <label className="label" htmlFor="birth">생년월일</label>
-              <input id="birth" type="date" className="input" />
+              <input 
+                id="birth" 
+                type="date" 
+                className="input" 
+                value={birth}
+                onChange={(e) => setBirth(e.target.value)}
+                required
+              />
             </div>
 
             {/* ── 환자번호 인증 ────────────────────────────────────────── */}
@@ -86,7 +209,14 @@ export default function PatientSignUp() {
             <div className="inline-group">
               <div className="field" style={{ margin: 0 }}>
                 <label className="label" htmlFor="patientId">환자번호</label>
-                <input id="patientId" className="input" placeholder="예) 734928" />
+                <input 
+                  id="patientId" 
+                  className="input" 
+                  placeholder="예) 734928" 
+                  value={patientId}
+                  onChange={(e) => setPatientId(e.target.value)}
+                  required
+                />
               </div>
               <button type="button" className="btn-soft" aria-label="환자번호 인증">인증</button>
             </div>
@@ -95,7 +225,13 @@ export default function PatientSignUp() {
             <div className="inline-group">
               <div className="field" style={{ margin: 0 }}>
                 <label className="label" htmlFor="phone">전화번호 (선택)</label>
-                <input id="phone" className="input" placeholder="010-1234-5678" />
+                <input 
+                  id="phone" 
+                  className="input" 
+                  placeholder="010-1234-5678" 
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                />
               </div>
               <button type="button" className="btn-soft" aria-label="전화번호 인증">인증</button>
             </div>
@@ -104,12 +240,20 @@ export default function PatientSignUp() {
             <div className="inline-group">
               <div className="field" style={{ margin: 0 }}>
                 <label className="label" htmlFor="hospital">주 진료 병원 (선택)</label>
-                <input id="hospital" className="input" placeholder="예) AIGEM 병원" />
+                <input 
+                  id="hospital" 
+                  className="input" 
+                  placeholder="예) AIGEM 병원" 
+                  value={hospital}
+                  onChange={(e) => setHospital(e.target.value)}
+                />
               </div>
               <button type="button" className="btn-soft" aria-label="병원 찾기">찾기</button>
             </div>
 
-            <button type="submit" className="btn btn-primary w100">가입하기</button>
+            <button type="submit" className="btn btn-primary w100" disabled={loading}>
+              {loading ? '처리 중...' : '가입하기'}
+            </button>
 
             <p className="foot">
               이미 계정이 있으신가요? <Link href="/login" className="auth-link">로그인</Link>
@@ -170,6 +314,22 @@ export default function PatientSignUp() {
         .foot{ margin-top:6px; font-size:14px; color:#334155; text-align:center; }
         .auth-link{ color:#2563eb; font-weight:600; text-decoration:none; }
         .auth-link:hover{ text-decoration:underline; }
+        
+        .btn-google{
+          display:flex; align-items:center; justify-content:center; gap:12px;
+          width:100%; height:48px; margin-bottom:16px;
+          background:#fff; border:1px solid #e1e9ff;
+          border-radius:12px; cursor:pointer;
+          transition:.18s ease; font-weight:600;
+        }
+        .btn-google:hover{ background:#f8faff; border-color:#d1dcff; }
+        .btn-google:disabled{ opacity:0.6; cursor:not-allowed; }
+        
+        .error-message{
+          background:#fee; color:#dc2626; padding:12px;
+          border-radius:8px; margin-bottom:16px;
+          font-size:14px; text-align:center;
+        }
       `}</style>
     </>
   );

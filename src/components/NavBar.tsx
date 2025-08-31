@@ -5,90 +5,153 @@ import { useRouter } from "next/router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 
-// 알림 히스토리(없어도 안전)
-const AlertHistory = dynamic(
-  () =>
-    import("./AlertHistory").catch(
-      () => () => <div style={{ padding: 12, color: "#334155" }}>알림 내역을 불러올 수 없습니다.</div>
-    ),
-  { ssr: false }
+/** 역할 타입 */
+type Role = "doctor" | "nurse" | "patient" | "guardian" | "caregiver";
+
+/** === 역할별 AlertHistory 로더 (동적 import + 안전 폴백) === */
+const FallbackAlert = () => (
+  <div style={{ padding: 12, color: "#334155" }}>알림 내역을 불러올 수 없습니다.</div>
 );
+// 공통 동적 로더 헬퍼
+const makeDyn = (loader: () => Promise<any>) =>
+  dynamic(() => loader().then((m) => m.default || m).catch(() => FallbackAlert), { ssr: false });
+
+// ✅ 의사용 (철자 그대로 docter)
+const DoctorAlertHistory    = makeDyn(() => import("./alerthistory/docter"));
+const NurseAlertHistory     = makeDyn(() => import("./alerthistory/nurse"));
+const PatientAlertHistory   = makeDyn(() => import("./alerthistory/patient"));
+const GuardianAlertHistory  = makeDyn(() => import("./alerthistory/guardian"));
+const CaregiverAlertHistory = makeDyn(() => import("./alerthistory/caregiver"));
+
+/** 역할별 기본 프로필(라우트 기준으로 강제 적용) */
+const DEFAULTS: Record<
+  Role,
+  { name: string; email?: string; id?: string; idLabel: "환자번호" | "면허번호" | "ID" }
+> = {
+  doctor:    { name: "김문수",  email: "munsu.kim@aigem.dev",    id: "doc001",   idLabel: "면허번호" },
+  nurse:     { name: "박소연",  email: "soyeon.park@aigem.dev",  id: "NRS-0001", idLabel: "면허번호" },
+  patient:   { name: "김복순",  email: "boksun.kim@aigem.dev",   id: "p001",     idLabel: "환자번호" },
+  guardian:  { name: "이상훈",  email: "sanghoon.lee@aigem.dev", id: "g001",     idLabel: "ID" },
+  caregiver: { name: "최은정",  email: "eunjeong.choi@aigem.dev",id: "CGV-0001", idLabel: "ID" },
+};
 
 export default function NavBar() {
   const router = useRouter();
 
-  const [openMenu, setOpenMenu] = useState(false);   // 햄버거 드롭다운
-  const [openAlerts, setOpenAlerts] = useState(false); // 알림 팝오버
+  const [openMenu, setOpenMenu] = useState(false);
+  const [openAlerts, setOpenAlerts] = useState(false);
 
-  const [isAuthed, setIsAuthed] = useState(false);
+  // 🔒 알림 팝오버가 열릴 때의 역할을 고정 (열려있는 동안만)
+  const [alertRole, setAlertRole] = useState<Role | null>(null);
+
   const [userName, setUserName] = useState("유제나");
   const [userEmail, setUserEmail] = useState("");
-
-  // 카드에 표기되는 번호(환자번호/면허번호/기타)
   const [userId, setUserId] = useState("");
   const [idLabel, setIdLabel] = useState<"환자번호" | "면허번호" | "ID">("ID");
 
-  // 경로에서 역할 추정 → 대시보드 경로
-  const role = useMemo(() => {
-    const p = router.pathname.toLowerCase();
-    if (p.includes("doctor")) return "doctor";
-    if (p.includes("nurse")) return "nurse";
-    if (p.includes("guardian")) return "guardian";
-    if (p.includes("patient")) return "patient";
+  /** 현재 경로로부터 역할을 해석 (열고/닫을 때마다 재평가) */
+  const resolveRole = (): Role => {
+    const path = (router.asPath || router.pathname || "").toLowerCase();
+    const m = path.match(/\/dashboard\/(doctor|nurse|guardian|caregiver|patient)\b/);
+    if (m && m[1]) return m[1] as Role;
+    if (router.pathname.toLowerCase().includes("doctor")) return "doctor";
+    if (router.pathname.toLowerCase().includes("nurse")) return "nurse";
+    if (router.pathname.toLowerCase().includes("guardian")) return "guardian";
+    if (router.pathname.toLowerCase().includes("caregiver")) return "caregiver";
+    if (router.pathname.toLowerCase().includes("patient")) return "patient";
     return "doctor";
-  }, [router.pathname]);
-  const dashPath = `/dashboard/${role}`;
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const ok = localStorage.getItem("isAuthed") === "true" || !!localStorage.getItem("userName");
-    setIsAuthed(ok);
-
-    const qn = typeof router.query.name === "string" ? router.query.name : null;
-    setUserName((qn && qn.trim()) || localStorage.getItem("userName") || "유제나");
-
-    const qe = typeof router.query.email === "string" ? router.query.email : null;
-    setUserEmail(
-      (qe && qe.trim()) || localStorage.getItem("userEmail") || localStorage.getItem("email") || ""
-    );
-
-    // 번호 수집
-    const qid = typeof router.query.id === "string" ? router.query.id : null;
-    const ls = (k: string) => localStorage.getItem(k) || "";
-
-    const patientId = ls("patientId") || ls("patientID") || ls("patientNo");
-    const license = ls("licenseNumber") || ls("licenseNo");
-    const other = ls("userId") || ls("staffId") || ls("id");
-
-    const value = (qid && qid.trim()) || patientId || license || other || "";
-    setUserId(value);
-
-    let label: "환자번호" | "면허번호" | "ID" = "ID";
-    if (patientId || role === "patient") label = "환자번호";
-    else if (license || role === "doctor" || role === "nurse") label = "면허번호";
-    setIdLabel(label);
-  }, [router.query.name, router.query.email, router.query.id, role]);
-
-  const handleLogoClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    router.push(isAuthed ? dashPath : "/login");
   };
 
-  // 팝오버 외부 클릭 닫기
+  /** 대시보드/프로필 경로 (경로 바뀔 때마다 재계산) */
+  const dashPath    = useMemo(() => `/dashboard/${resolveRole()}`, [router.asPath]);
+  const profilePath = useMemo(() => `/profile/${resolveRole()}`, [router.asPath]);
+
+  /** 현재 표시할 역할: 팝오버 열릴 때 고정된 alertRole이 있으면 우선, 아니면 즉시 재평가 */
+  const activeRole: Role = alertRole ?? resolveRole();
+
+  /** 🔔 역할별 알림 컴포넌트 */
+  const AlertComp = useMemo(() => {
+    switch (activeRole) {
+      case "doctor":    return DoctorAlertHistory;
+      case "nurse":     return NurseAlertHistory;
+      case "patient":   return PatientAlertHistory;
+      case "guardian":  return GuardianAlertHistory;
+      case "caregiver": return CaregiverAlertHistory;
+      default:          return FallbackAlert;
+    }
+  }, [activeRole]);
+
+  /** 기본 프로필을 라우트 기준으로 강제 적용 (쿼리가 있으면 우선) */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const roleNow = resolveRole();
+    const qn  = typeof router.query.name === "string" ? router.query.name.trim() : "";
+    const qe  = typeof router.query.email === "string" ? router.query.email.trim() : "";
+    const qid = typeof router.query.id === "string" ? router.query.id.trim() : "";
+    setUserName(qn || DEFAULTS[roleNow].name);
+    setUserEmail(qe || DEFAULTS[roleNow].email || "");
+    setUserId(qid || DEFAULTS[roleNow].id || "");
+    setIdLabel(DEFAULTS[roleNow].idLabel);
+  }, [router.query.name, router.query.email, router.query.id, router.asPath]);
+
+  /** 라우팅 시작하면 팝오버 닫고 역할 고정 해제 */
+  useEffect(() => {
+    const closeAll = () => { setOpenAlerts(false); setOpenMenu(false); setAlertRole(null); };
+    router.events.on("routeChangeStart", closeAll);
+    return () => { router.events.off("routeChangeStart", closeAll); };
+  }, [router.events]);
+
+  /** ESC로 닫기 */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setOpenAlerts(false); setOpenMenu(false); setAlertRole(null); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  /** 로고 클릭: 현재 역할의 대시보드로 이동 */
+  const handleLogoClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    router.push(`/dashboard/${resolveRole()}`);
+  };
+
+  /** 팝오버 외부 클릭 닫기 */
   const alertsRef = useRef<HTMLDivElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuRef   = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const onDown = (ev: MouseEvent) => {
       const t = ev.target as Node;
-      if (openAlerts && alertsRef.current && !alertsRef.current.contains(t)) setOpenAlerts(false);
-      if (openMenu && menuRef.current && !menuRef.current.contains(t)) setOpenMenu(false);
+      if (openAlerts && alertsRef.current && !alertsRef.current.contains(t)) {
+        resolveRole(); setOpenAlerts(false); setAlertRole(null);
+      }
+      if (openMenu && menuRef.current && !menuRef.current.contains(t)) {
+        setOpenMenu(false);
+      }
     };
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
   }, [openAlerts, openMenu]);
 
   const surname = (userName || "").trim().charAt(0) || "N";
+
+  /** 🔔 버튼 토글: 열고/닫을 때마다 항상 루트 검사 */
+  const toggleAlerts = () => {
+    setOpenAlerts(prev => {
+      const next = !prev;
+      const roleNow = resolveRole();
+      setAlertRole(next ? roleNow : null);
+      return next;
+    });
+    setOpenMenu(false);
+  };
+
+  /** 닫기 공통 핸들러 */
+  const closeAlerts = () => {
+    resolveRole();
+    setOpenAlerts(false);
+    setAlertRole(null);
+  };
 
   return (
     <header className="nb">
@@ -102,24 +165,20 @@ export default function NavBar() {
 
         {/* 가운데 메뉴 (md 이상) */}
         <nav className="center" aria-label="주 메뉴">
-          <Link href={dashPath} className={`pill ${router.pathname === dashPath ? "active" : ""}`}>대시보드</Link>
+          <Link href={dashPath} className={`pill ${router.asPath === dashPath ? "active" : ""}`}>대시보드</Link>
           <Link href={`${dashPath}#alerts`} className="pill">알림</Link>
           <Link href={`${dashPath}#settings`} className="pill">설정</Link>
         </nav>
 
         {/* 우측 버튼들 */}
         <div className="right">
-          <button
-            className="iconbtn"
-            aria-label="알림"
-            onClick={() => { setOpenAlerts(v => !v); setOpenMenu(false); }}
-          >
+          <button className="iconbtn" aria-label="알림" onClick={toggleAlerts}>
             <span className="badge">3</span>
             <span aria-hidden>🔔</span>
           </button>
           <button
             className="hamburger"
-            onClick={() => { setOpenMenu(v => !v); setOpenAlerts(false); }}
+            onClick={() => { setOpenMenu(v => !v); setOpenAlerts(false); setAlertRole(null); }}
             aria-label="메뉴 열기"
           >
             ≡
@@ -128,17 +187,19 @@ export default function NavBar() {
       </div>
 
       {/* 반투명 오버레이 */}
-      {(openAlerts || openMenu) && <div className="overlay" />}
+      {(openAlerts || openMenu) && (
+        <div className="overlay" onClick={() => { if (openAlerts) closeAlerts(); setOpenMenu(false); }} />
+      )}
 
       {/* 알림 팝오버 */}
       {openAlerts && (
         <div className="alerts-popover" ref={alertsRef} role="dialog" aria-label="알림 내역">
           <div className="alerts-head">
             <strong>알림 내역</strong>
-            <button className="x" onClick={() => setOpenAlerts(false)} aria-label="닫기">✕</button>
+            <button className="x" onClick={closeAlerts} aria-label="닫기">✕</button>
           </div>
           <div className="alerts-body">
-            <AlertHistory />
+            <AlertComp />
           </div>
         </div>
       )}
@@ -151,7 +212,7 @@ export default function NavBar() {
             <button className="x" onClick={() => setOpenMenu(false)} aria-label="닫기">✕</button>
           </div>
 
-          {/* 사용자 카드: 이름 + 번호 칩 */}
+          {/* 사용자 카드 */}
           <div className="user-card">
             <div className="avatar-lg">{surname}</div>
             <div className="uinfo">
@@ -165,16 +226,20 @@ export default function NavBar() {
 
           {/* 가운데 정렬 메뉴 */}
           <nav className="menu-list">
-            <Link href={`${dashPath}#profile`} className="row" onClick={() => setOpenMenu(false)}>
+            {/* ✅ 역할별 프로필 페이지로 이동 */}
+            <Link href={profilePath} className="row" onClick={() => setOpenMenu(false)}>
               내 프로필
             </Link>
-            <Link href={`${dashPath}#security`} className="row" onClick={() => setOpenMenu(false)}>
+
+            {/* ✅ 알림 설정 고정 경로 */}
+            <Link href="/settings/alert" className="row" onClick={() => setOpenMenu(false)}>
               알림 설정
             </Link>
 
             <hr />
 
-            <Link href="/login" className="row danger">
+            {/* ✅ 로그인 페이지로 이동 */}
+            <Link href="/login" className="row danger" onClick={() => setOpenMenu(false)}>
               로그아웃
             </Link>
           </nav>
@@ -290,8 +355,6 @@ export default function NavBar() {
         .muted{ font-size:12px; color:#64748b; }
 
         .menu-list{ display:flex; flex-direction:column; gap:8px; }
-
-        /* Link가 렌더한 실제 <a>를 명확히 타깃 */
         .menu-list :global(a.row){
           display:flex; align-items:center; justify-content:center;
           width:100%;
@@ -308,7 +371,6 @@ export default function NavBar() {
         }
         .menu-list :global(a.row.danger){ color:#c24141; }
 
-        /* 로그아웃 위 구분선 유지 */
         hr{ border:0; border-top:1px solid #eef3fb; margin:6px 0 }
       `}</style>
     </header>

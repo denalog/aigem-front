@@ -1,12 +1,17 @@
+// src/pages/login.tsx
 import Head from "next/head";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useState } from "react";
-import { signInWithEmailPassword, signInWithGoogle, getUserRole, getAuthErrorMessage } from "../lib/auth";
+// ✅ 구글 로그인은 잠시 비활성화하므로 import에서 제거
+import {
+  signInWithEmailPassword,
+  getUserRole,
+  getAuthErrorMessage,
+  // signInWithGoogle,  // ← (임시 비활성)
+} from "../lib/auth";
 
-// ### Backend ###
-// 로그인 페이지 컴포넌트
 export default function Login() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -14,78 +19,54 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showEmailLogin, setShowEmailLogin] = useState(false);
+  const [comingSoonOpen, setComingSoonOpen] = useState(false); // ✅ 팝업 오픈 상태
 
-  // ### Backend ###
-  // Google 로그인 처리 함수
-  const handleGoogleSignIn = async () => {
-    setLoading(true);
+  /** =========================
+   *  Google 로그인 (임시 비활성)
+   *  =========================
+   *  기존 구현은 아래와 같이 동작했음:
+   *
+   *  const handleGoogleSignIn = async () => {
+   *    setLoading(true);
+   *    setError("");
+   *    try {
+   *      const cred = await signInWithGoogle(); // UserCredential
+   *      const user = cred?.user;
+   *      const role = await getUserRole(user.uid);
+   *      router.push(role ? `/dashboard/${role}` : `/signup?email=${encodeURIComponent(user.email || '')}`);
+   *    } catch (e: any) {
+   *      const errorCode = e?.code || 'auth/unknown-error';
+   *      setError(getAuthErrorMessage(errorCode));
+   *    } finally {
+   *      setLoading(false);
+   *    }
+   *  };
+   */
+
+  // ✅ 지금은 버튼을 누르면 "추후 개발 예정" 팝업만 띄움
+  const handleGoogleSignIn = () => {
     setError("");
-    try {
-      const user = await signInWithGoogle();
-      
-      // 사용자 역할 조회
-      const role = await getUserRole(user.uid);
-      
-      if (role) {
-        // 역할에 따라 대시보드로 리다이렉트
-        router.push(`/dashboard/${role}`);
-      } else {
-        // 역할이 없으면 회원가입 페이지로 (Google 이메일과 함께)
-        router.push(`/signup?email=${encodeURIComponent(user.email || '')}`);
-      }
-    } catch (error: any) {
-      console.error('Google 로그인 에러:', error);
-      console.error('에러 상세:', {
-        code: error?.code,
-        message: error?.message,
-        customData: error?.customData
-      });
-      
-      const errorCode = error?.code || 'auth/unknown-error';
-      const errorMessage = getAuthErrorMessage(errorCode);
-      setError(errorMessage);
-    } finally {
-      setLoading(false);
-    }
+    setComingSoonOpen(true);
   };
 
-  // ### Backend ###
-  // 이메일/비밀번호 로그인 처리 함수
+  // 이메일/비밀번호 로그인
   const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    
-    // 필수 필드 검증
     if (!email || !password) {
       setError("이메일과 비밀번호를 입력해주세요.");
       return;
     }
-
     setLoading(true);
-
     try {
-      const user = await signInWithEmailPassword(email, password);
-      
-      // 사용자 역할 조회
+      const credOrUser = await signInWithEmailPassword(email, password);
+      const user = (credOrUser && "user" in credOrUser) ? credOrUser.user : credOrUser;
+      if (!user?.uid) throw { code: "auth/unknown-user" };
       const role = await getUserRole(user.uid);
-      
-      if (role) {
-        // 역할에 따라 대시보드로 리다이렉트
-        router.push(`/dashboard/${role}`);
-      } else {
-        setError("사용자 정보를 찾을 수 없습니다. 관리자에게 문의해주세요.");
-      }
-    } catch (error: any) {
-      console.error('이메일 로그인 에러:', error);
-      console.error('에러 상세:', {
-        code: error?.code,
-        message: error?.message,
-        customData: error?.customData
-      });
-      
-      const errorCode = error?.code || 'auth/unknown-error';
-      const errorMessage = getAuthErrorMessage(errorCode);
-      setError(errorMessage);
+      router.push(typeof role === "string" && role ? `/dashboard/${role}` : "/dashboard");
+    } catch (e: any) {
+      const errorCode = e?.code || "auth/unknown-error";
+      setError(getAuthErrorMessage(errorCode));
     } finally {
       setLoading(false);
     }
@@ -108,19 +89,21 @@ export default function Login() {
           <h1 id="title" className="auth-title">로그인</h1>
           <p className="subtitle">AIGEM에 오신 것을 환영합니다.</p>
 
-          {/* 에러 메시지 표시 */}
+          {/* 에러 메시지 */}
           {error && (
             <div className="error-message" role="alert">
               {error}
             </div>
           )}
 
-          {/* Google 로그인 버튼 */}
+          {/* Google 로그인 (지금은 팝업만) */}
           <button
             type="button"
             className="btn-google"
             onClick={handleGoogleSignIn}
             disabled={loading}
+            aria-haspopup="dialog"
+            aria-controls="coming-soon-dialog"
           >
             <Image src="/google_logo.png" alt="Google" width={20} height={20} />
             <span>Google로 로그인</span>
@@ -131,7 +114,7 @@ export default function Login() {
             <span>또는</span>
           </div>
 
-          {/* 이메일 로그인 토글 버튼 */}
+          {/* 이메일 로그인 */}
           {!showEmailLogin ? (
             <button
               type="button"
@@ -169,7 +152,7 @@ export default function Login() {
               </div>
 
               <button type="submit" className="btn btn-primary w100" disabled={loading}>
-                {loading ? '로그인 중...' : '로그인'}
+                {loading ? "로그인 중..." : "로그인"}
               </button>
 
               <button
@@ -186,8 +169,8 @@ export default function Login() {
           <div className="help-text">
             <p>💡 <strong>로그인 방법:</strong></p>
             <ul>
-              <li>Google 계정으로 간편 로그인</li>
               <li>회원가입 시 사용한 이메일/비밀번호로 로그인</li>
+              <li>Google 간편로그인은 추후 제공 예정입니다.</li>
             </ul>
           </div>
 
@@ -196,12 +179,48 @@ export default function Login() {
             계정이 없으신가요? <Link href="/signup" className="auth-link">회원가입</Link>
           </p>
 
-          {/* 약관 안내 */}
           <p className="terms">
             로그인 시 서비스 이용약관 및 개인정보 처리방침에 동의합니다.
           </p>
         </section>
       </div>
+
+      {/* ✅ "추후 개발 예정" 팝업 */}
+      {comingSoonOpen && (
+        <div
+          id="coming-soon-dialog"
+          role="dialog"
+          aria-modal="true"
+          className="modal-backdrop"
+          onClick={(e) => {
+            // 배경 클릭으로 닫기 (원하면 막아도 됨)
+            if (e.target === e.currentTarget) setComingSoonOpen(false);
+          }}
+        >
+          <div className="modal">
+            <div className="modal-header">
+              <Image src="/logo_org.png" alt="AIGEM" width={100} height={24} />
+            </div>
+            <div className="modal-body">
+              <h2 className="modal-title">추후 개발 예정입니다</h2>
+              <p className="modal-desc">
+                현재 베타 버전에서는 Google 간편로그인을 제공하지 않습니다.
+                이메일/비밀번호로 로그인해 주세요.
+              </p>
+            </div>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setComingSoonOpen(false)}
+                autoFocus
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 페이지 전용 스타일 */}
       <style jsx>{`
@@ -281,6 +300,7 @@ export default function Login() {
           height:48px; border-radius:12px; border:none;
           font-weight:600; cursor:pointer; transition:.18s ease;
           display:flex; align-items:center; justify-content:center;
+          padding:0 18px;
         }
         .btn-primary{
           background:linear-gradient(135deg, #4a86ff 0%, #2563eb 100%);
@@ -296,6 +316,33 @@ export default function Login() {
         .help-text p{ margin:0 0 8px; color:#1f3b7a; }
         .help-text ul{ margin:0; padding-left:16px; color:#475569; }
         .help-text li{ margin-bottom:4px; }
+
+        /* ========= AIGEM 스타일 팝업 ========= */
+        .modal-backdrop{
+          position:fixed; inset:0; display:grid; place-items:center;
+          background:rgba(15, 23, 42, 0.45); /* slate-900/45 */
+          z-index:50; padding:16px;
+        }
+        .modal{
+          width:100%; max-width:420px; background:#fff; border-radius:18px;
+          box-shadow:0 18px 50px rgba(21,44,84,.25);
+          overflow:hidden; animation:pop .18s ease-out;
+        }
+        .modal-header{
+          display:flex; align-items:center; gap:8px;
+          padding:16px; background:linear-gradient(135deg, #eef3ff, #f7faff);
+          border-bottom:1px solid #e6eeff;
+        }
+        .modal-body{ padding:22px 20px 0; text-align:center; }
+        .modal-title{ margin:0 0 8px; font-size:18px; font-weight:800; color:#0b1b33; }
+        .modal-desc{ margin:0; color:#475569; font-size:14px; line-height:1.55; }
+        .modal-actions{
+          padding:18px 20px 22px; display:flex; justify-content:center;
+        }
+        @keyframes pop{
+          from{ transform:translateY(6px) scale(.98); opacity:0 }
+          to{ transform:translateY(0) scale(1); opacity:1 }
+        }
       `}</style>
     </>
   );

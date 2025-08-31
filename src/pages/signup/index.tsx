@@ -2,7 +2,7 @@ import Head from "next/head";
 import Image from "next/image";
 import { useRouter } from "next/router";
 
-type Role = "doctor" | "nurse" | "patient" | "guardian";
+type Role = "doctor" | "nurse" | "caregiver" | "patient" | "guardian";
 
 export default function SignupSelect() {
   const router = useRouter();
@@ -42,8 +42,16 @@ export default function SignupSelect() {
               <span className="chev" aria-hidden>›</span>
             </button>
 
-            <button className="role-btn" onClick={() => go("patient")} aria-label="환자로 가입">
+            <button className="role-btn" onClick={() => go("caregiver")} aria-label="요양사로 가입">
               <span className="avatar">3</span>
+              <div className="txt">
+                <strong>요양사</strong><span>Caregiver</span>
+              </div>
+              <span className="chev" aria-hidden>›</span>
+            </button>
+
+            <button className="role-btn" onClick={() => go("patient")} aria-label="환자로 가입">
+              <span className="avatar">4</span>
               <div className="txt">
                 <strong>환자</strong><span>Patient</span>
               </div>
@@ -51,7 +59,7 @@ export default function SignupSelect() {
             </button>
 
             <button className="role-btn" onClick={() => go("guardian")} aria-label="보호자로 가입">
-              <span className="avatar">4</span>
+              <span className="avatar">5</span>
               <div className="txt">
                 <strong>보호자</strong><span>Guardian</span>
               </div>
@@ -79,6 +87,7 @@ export default function SignupSelect() {
         .brand{ margin-bottom:14px; }
         .title{ margin:0 0 6px; font-size:22px; font-weight:800; color:#0b1b33; }
         .subtitle{ margin:0 0 14px; color:#475569; font-size:14px; }
+
         .grid{ display:grid; grid-template-columns:1fr; gap:12px; }
         @media (min-width:480px){ .grid{ grid-template-columns:1fr 1fr; gap:16px; } }
 
